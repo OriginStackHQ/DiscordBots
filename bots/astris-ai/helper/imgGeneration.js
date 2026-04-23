@@ -73,7 +73,7 @@ const generateGoogleFx = async (prompt, imageCount = 1, aspectRatio = "IMAGE_ASP
   }
 };
 
-const generateGoogleFxImage = async (prompt, imageCount = 1, aspectRatio = "IMAGE_ASPECT_RATIO_SQUARE", guildId) => {
+const generateGoogleFxImage = async (prompt, imageCount = 1, aspectRatio = "IMAGE_ASPECT_RATIO_SQUARE") => {
   const sizeMap = {
     IMAGE_ASPECT_RATIO_SQUARE: "1024x1024",
     IMAGE_ASPECT_RATIO_PORTRAIT: "1024x1792",
@@ -81,10 +81,10 @@ const generateGoogleFxImage = async (prompt, imageCount = 1, aspectRatio = "IMAG
   };
   const data = {
     model: "img4",
-    n: imageCount,
+    n: imageCount || 1,
     prompt: prompt,
-    response_format: "b64_json",
-    size: sizeMap[aspectRatio] || sizeMap["IMAGE_ASPECT_RATIO_SQUARE"],
+    response_format: "b64",
+    size: sizeMap[aspectRatio] || sizeMap.IMAGE_ASPECT_RATIO_SQUARE,
   };
 
   try {
@@ -100,6 +100,7 @@ const generateGoogleFxImage = async (prompt, imageCount = 1, aspectRatio = "IMAG
     }
 
     const base64Images = [];
+    console.log(response.data.data);
     response.data.data.forEach((image) => {
       if (image.b64_json) {
         base64Images.push(image.b64_json);
