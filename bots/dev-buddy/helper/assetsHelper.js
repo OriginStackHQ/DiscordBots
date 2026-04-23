@@ -9,7 +9,13 @@ const scrapeWallpaper = async (url) => {
       throw new Error("Please provide a valid URL from hdqwalls.com only");
     }
 
-    const { data: html } = await axios.get(url);
+    const { data: html } = await axios.get("https://api.scrapingdog.com/scrape", {
+      params: {
+        api_key: "68d38d88c6f245056cbe56ed",
+        url: url,
+        dynamic: "false",
+      },
+    });
     const $ = cheerio.load(html);
 
     // Title
