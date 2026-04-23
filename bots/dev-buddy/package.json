@@ -1,7 +1,7 @@
 {
-  "name": "cloud-buddy",
+  "name": "dev-buddy",
   "version": "1.0.0",
-  "description": "CloudBuddy - A Discord bot for posting assets",
+  "description": "DevBuddy - A Discord bot for posting assets",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
