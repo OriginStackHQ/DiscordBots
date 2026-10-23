@@ -12,13 +12,13 @@
     "url": "https://github.com/TechThrives/DiscordBots/issues"
   },
   "homepage": "https://github.com/TechThrives/DiscordBots#readme",
-  "packageManager": "npm@11.4.1",
+  "packageManager": "npm@12.2.1",
   "workspaces": [
     "bots/*"
   ],
   "devDependencies": {
-    "nodemon": "^3.1.10",
-    "prettier": "^3.5.3",
-    "turbo": "^2.5.3"
+    "nodemon": "^3.1.14",
+    "prettier": "^3.9.10",
+    "turbo": "^2.11.10"
   }
 }

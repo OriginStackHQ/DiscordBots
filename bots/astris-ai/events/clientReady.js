@@ -17,7 +17,7 @@ function setBotStatus(client, status) {
       client.user.setPresence({
         activities: [
           {
-            name: "Powered by creativity & code",
+            name: "Your Ai Buddy",
             type: ActivityType.Custom,
           },
         ],
@@ -30,14 +30,14 @@ function setBotStatus(client, status) {
 }
 
 module.exports = {
-  name: "ready",
+  name: "clientReady",
   once: true,
   execute(client) {
     try {
       client.user.setPresence({
         activities: [
           {
-            name: "Powered by creativity & code",
+            name: "Your Ai Buddy",
             type: ActivityType.Custom,
           },
         ],

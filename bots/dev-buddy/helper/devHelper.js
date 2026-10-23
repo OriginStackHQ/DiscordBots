@@ -111,37 +111,72 @@ const solveLeetCode = async (titleSlug) => {
 
     Respond only with code blocks for each language, clearly labeled.`;
 
-    const generationConfig = {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: "object",
-        properties: {
-          cpp: {
-            type: "string",
-            description: "C++ solution code",
-          },
-          java: {
-            type: "string",
-            description: "Java solution code",
-          },
-          python: {
-            type: "string",
-            description: "Python solution code",
-          },
-        },
-        required: ["cpp", "java", "python"],
-      },
-    };
-
     const prompt = `LeetCode problem:\n${formatHtmlToPrompt(data.question.content)}\n\nBase code templates for each language:\n**C++:**\n${formatHtmlToPrompt(data.question.codeSnippets[0].code)}\n\n**Java:**\n${formatHtmlToPrompt(data.question.codeSnippets[1].code)}\n\n**Python:**\n${formatHtmlToPrompt(data.question.codeSnippets[2].code)}`;
 
-    const solution = await aiResponse(systemPrompt, prompt, generationConfig);
+    const solution = await aiResponse(systemPrompt, prompt);
 
     if (!solution) {
       throw new Error("Failed to solve LeetCode question");
     }
 
-    const parsedSolution = JSON.parse(solution);
+    // Extract the JSON object robustly (some models wrap it in code fences)
+    const jsonStart = solution.indexOf("{");
+    const jsonEnd = solution.lastIndexOf("}");
+    if (jsonStart === -1 || jsonEnd === -1) {
+      throw new Error("Failed to parse AI solution: no JSON found");
+    }
+    const parsedSolution = JSON.parse(solution.slice(jsonStart, jsonEnd + 1));
+
+    // Normalize the AI output to { cpp, java, python } with string code values.
+    // Models may use display-name keys ("C++"), wrapper objects ({ code }) or
+    // a nesting level around the whole response depending on the run.
+    const normalizeSolution = (raw) => {
+      const keyFor = (name) => {
+        const s = name.toLowerCase();
+        if (s.includes("c++") || s.includes("cpp") || s.includes("c_plus") || s.includes("cplus")) return "cpp";
+        if (s.includes("python") || s.includes("py")) return "python";
+        if (s.includes("java")) return "java";
+        return null;
+      };
+
+      const normalized = {};
+      const forEachEntry = (entry) => {
+        for (const [key, value] of Object.entries(entry)) {
+          const target = keyFor(key);
+
+          if (target) {
+            if (typeof value === "string" && !normalized[target]) {
+              normalized[target] = value;
+            } else if (value && typeof value === "object") {
+              // Language key mapped to an object - accept { code } wrappers
+              // or a nested { cpp, java, python } group.
+              if (typeof value.code === "string" && !normalized[target]) {
+                normalized[target] = value.code;
+              } else if (typeof value.code === "object" || typeof value === "object") {
+                forEachEntry(value);
+              }
+            } else if (value && typeof value === "object" && !Array.isArray(value)) {
+              forEachEntry(value);
+            }
+            continue;
+          }
+
+          // Unknown key name at this level - recurse into plain objects,
+          // this covers wrapper objects around the whole solution.
+          if (value && typeof value === "object" && !Array.isArray(value)) {
+            forEachEntry(value);
+          }
+        }
+      };
+
+      forEachEntry(raw && typeof raw === "object" ? raw : {});
+      return normalized;
+    };
+
+    const normalizedSolution = normalizeSolution(parsedSolution);
+    if (!normalizedSolution.cpp && !normalizedSolution.java && !normalizedSolution.python) {
+      throw new Error("AI returned no recognizable solutions");
+    }
 
     return {
       id: data.question.questionId,
@@ -152,7 +187,7 @@ const solveLeetCode = async (titleSlug) => {
       difficulty: data.question.difficulty,
       topicTags: data.question.topicTags.map((tag) => tag.name),
       content: formatHtmlToPrompt(data.question.content),
-      solution: parsedSolution,
+      solution: normalizedSolution,
     };
   } catch (error) {
     console.error("Error solving LeetCode question:", error);
@@ -160,56 +195,36 @@ const solveLeetCode = async (titleSlug) => {
   }
 };
 
-const aiResponse = async (systemPrompt, prompt, generationConfig) => {
+const aiResponse = async (systemPrompt, prompt) => {
   try {
-    const body = {
-      system_instruction: {
-        parts: [
+    const response = await axios.post(
+      `${config.openAiBaseUrl}/chat/completions`,
+      {
+        model: config.openAiModel,
+        messages: [
           {
-            text: systemPrompt,
+            role: "system",
+            content: systemPrompt,
+          },
+          {
+            role: "user",
+            content: prompt,
           },
         ],
+        response_format: { type: "json_object" },
       },
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: prompt,
-            },
-          ],
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.openAiApiKey}`,
         },
-      ],
-      generationConfig: generationConfig,
-      safetySettings: [
-        {
-          category: "HARM_CATEGORY_HARASSMENT",
-          threshold: "BLOCK_MEDIUM_AND_ABOVE",
-        },
-        {
-          category: "HARM_CATEGORY_HATE_SPEECH",
-          threshold: "BLOCK_MEDIUM_AND_ABOVE",
-        },
-        {
-          category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-          threshold: "BLOCK_MEDIUM_AND_ABOVE",
-        },
-        {
-          category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-          threshold: "BLOCK_MEDIUM_AND_ABOVE",
-        },
-      ],
-    };
-
-    const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.geminiKey}`,
-      body,
+        timeout: 30000,
+      },
     );
 
-    if (response.data && response.data.candidates && response.data.candidates[0]) {
-      const aiResponse = response.data.candidates[0].content.parts[0].text;
+    if (response.data?.choices?.[0]?.message?.content) {
       log("INFO", `User message replied successfully.`);
-      return aiResponse.trim();
+      return response.data.choices[0].message.content.trim();
     }
 
     throw new Error("Unable to fetch AI response. Please try again.");

@@ -10,20 +10,14 @@ module.exports = {
     {
       host: "lavalink.serenetia.com",
       password: "https://dsc.gg/ajidevserver",
-      port: 80,
-      secure: false,
+      port: 443,
+      secure: true,
     },
     {
-      host: "lavalinkv4-id.serenetia.com",
-      password: "https://dsc.gg/ajidevserver",
-      port: 80,
-      secure: false,
-    },
-    {
-      password: "youshallnotpass",
-      host: "vip.visionhost.cloud",
-      port: 7023,
-      secure: false,
+      host: "lavalinkv4.serenetia.com",
+      port: 443,
+      password: "https://seretia.link/discord",
+      secure: true,
     },
   ],
 };
