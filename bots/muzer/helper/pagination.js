@@ -335,7 +335,7 @@ async function createQueuePagination(interaction, player) {
   const chunkSize = 10;
   const chunks = [];
   const currentTrack = player.current;
-  const queue = player.queue;
+  const queue = player.queue.all;
 
   // Split playlists into chunks
   for (let i = 0; i < queue.length; i += chunkSize) {
@@ -358,11 +358,11 @@ async function createQueuePagination(interaction, player) {
     const chunk = chunks[pageIndex];
     const description = currentTrack
       ? `**Now Playing**\n` +
-        `[${currentTrack.info.title}](${currentTrack.info.uri}) - Requested by: ${currentTrack.info.requester || "Autoplay"}\n\n` +
+        `[${currentTrack.title}](${currentTrack.uri}) - Requested by: ${currentTrack.requester || "Autoplay"}\n\n` +
         `**Up Next**\n` +
-        `${chunk.map((song, idx) => `${pageIndex * chunkSize + idx + 1}. [${song.info.title}](${song.info.uri}) - Requested by: ${song.info.requester || "Autoplay"}`).join("\n")}`
+        `${chunk.map((song, idx) => `${pageIndex * chunkSize + idx + 1}. [${song.title}](${song.uri}) - Requested by: ${song.requester || "Autoplay"}`).join("\n")}`
       : `**Up Next**\n` +
-        `${chunk.map((song, idx) => `${pageIndex * chunkSize + idx + 1}. [${song.info.title}](${song.info.uri}) - Requested by: ${song.info.requester || "Autoplay"}`).join("\n")}`;
+        `${chunk.map((song, idx) => `${pageIndex * chunkSize + idx + 1}. [${song.title}](${song.uri}) - Requested by: ${song.requester || "Autoplay"}`).join("\n")}`;
 
     return new EmbedBuilder()
       .setColor("#00ff00")

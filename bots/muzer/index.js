@@ -54,6 +54,12 @@ for (const file of eventFiles) {
 
 initializePlayer(client);
 
+// Forward voice packets as soon as they arrive (Moonlink ignores early ones)
+client.on("raw", (d) => {
+  if (![GatewayDispatchEvents.VoiceStateUpdate, GatewayDispatchEvents.VoiceServerUpdate].includes(d.t)) return;
+  client.manager.packetUpdate(d);
+});
+
 async function main() {
   try {
     // Connect to MongoDB
@@ -66,11 +72,6 @@ async function main() {
     // Deploy slash commands
     await deployCommands();
     log("SUCCESS", `Bot ready as ${client.user.tag}`);
-
-    client.on("raw", (d) => {
-      if (![GatewayDispatchEvents.VoiceStateUpdate, GatewayDispatchEvents.VoiceServerUpdate].includes(d.t)) return;
-      client.riffy.updateVoiceState(d);
-    });
   } catch (err) {
     log("ERROR", `Startup failed: ${err.message}`);
     console.error(err);

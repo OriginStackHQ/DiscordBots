@@ -1,6 +1,6 @@
 # Discord Music Bot
 
-A Discord bot for playing music with Riffy and Lavalink
+A Discord bot for playing music with Moonlink.js and NodeLink/Lavalink
 
 ## Features
 

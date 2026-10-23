@@ -8,9 +8,9 @@ module.exports = {
   async execute(interaction) {
     const client = interaction.client;
 
-    const player = client.riffy.players.get(interaction.guildId);
+    const player = client.manager.players.get(interaction.guildId);
 
-    if (!player || (player.queue.length === 0)) {
+    if (!player || (player.queue.size === 0)) {
       const embed = new EmbedBuilder()
         .setColor("#ff0000")
         .setAuthor({

@@ -7,7 +7,7 @@ module.exports = {
   async execute(interaction) {
     const client = interaction.client;
 
-    const player = client.riffy.players.get(interaction.guildId);
+    const player = client.manager.players.get(interaction.guildId);
 
     if (!player) {
       const errorEmbed = new EmbedBuilder()
@@ -29,7 +29,7 @@ module.exports = {
       return;
     }
 
-    player.pause(true);
+    await player.pause();
 
     const embed = new EmbedBuilder()
       .setColor("#fe8a7a")

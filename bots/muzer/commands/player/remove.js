@@ -13,9 +13,9 @@ module.exports = {
     const client = interaction.client;
 
     const position = interaction.options.getInteger("position");
-    const player = client.riffy.players.get(interaction.guildId);
+    const player = client.manager.players.get(interaction.guildId);
 
-    if (!player || !player.queue || player.queue.length === 0) {
+    if (!player || !player.queue || player.queue.size === 0) {
       const emptyQueueEmbed = new EmbedBuilder()
         .setColor("#ff0000")
         .setAuthor({
@@ -32,14 +32,14 @@ module.exports = {
       return;
     }
 
-    if (position < 1 || position > player.queue.length) {
+    if (position < 1 || position > player.queue.size) {
       const invalidPositionEmbed = new EmbedBuilder()
         .setColor("#ff0000")
         .setAuthor({
           name: "Invalid position",
           iconURL: icons.headerIcon,
         })
-        .setDescription(`Please provide a valid position between 1 and ${player.queue.length}.`)
+        .setDescription(`Please provide a valid position between 1 and ${player.queue.size}.`)
         .setFooter({ text: "Enjoy your music", iconURL: icons.footerIcon });
 
       await interaction.reply({
@@ -49,7 +49,7 @@ module.exports = {
       return;
     }
 
-    const removedTrack = player.queue.splice(position - 1, 1)[0];
+    const removedTrack = player.queue.remove(position - 1);
 
     const embed = new EmbedBuilder()
       .setColor("#00ff00")
@@ -57,7 +57,7 @@ module.exports = {
         name: "Song removed",
         iconURL: icons.headerIcon,
       })
-      .setDescription(`Removed **${removedTrack.info.title}** from the queue.`)
+      .setDescription(`Removed **${removedTrack.title}** from the queue.`)
       .setFooter({ text: "Enjoy your music", iconURL: icons.footerIcon });
 
     await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });

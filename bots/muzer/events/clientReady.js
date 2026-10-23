@@ -3,7 +3,7 @@ const { log } = require("../utils/common");
 
 function setBotStatus(client) {
   try {
-    const activePlayers = Array.from(client.riffy.players.values()).filter((player) => player.playing);
+    const activePlayers = client.manager.players.filter((player) => player.playing);
 
     if (!activePlayers.length) {
       client.user.setPresence({
@@ -35,7 +35,7 @@ function setBotStatus(client) {
 module.exports = {
   name: "clientReady",
   once: true,
-  execute(client) {
+  async execute(client) {
     try {
       client.user.setPresence({
         activities: [
@@ -49,7 +49,7 @@ module.exports = {
 
       setInterval(() => setBotStatus(client), 5000);
 
-      client.riffy.init(client.user.id);
+      await client.manager.init(client.user.id);
     } catch (error) {
       console.error("Error setting presence:", error);
     }

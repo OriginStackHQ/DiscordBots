@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 const icons = require("../../icons");
 const { getCollection } = require("../../mongodb");
+const { log } = require("../../utils/common");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -13,6 +14,9 @@ module.exports = {
   async execute(interaction) {
     const client = interaction.client;
     const query = interaction.options.getString("name");
+
+    // Acknowledge instantly — voice handshakes and searches can exceed 3s
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const config = await getCollection("guildConfigs").findOne({ guildId: interaction.guild.id });
 
@@ -29,10 +33,7 @@ module.exports = {
         })
         .setDescription("Music channel is not set. Please contact moderator.");
 
-      await interaction.reply({
-        embeds: [embed],
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.editReply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -49,14 +50,11 @@ module.exports = {
         })
         .setDescription(`You must be in <#${config.channelId}> voice channel to use this command.`);
 
-      await interaction.reply({
-        embeds: [embed],
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.editReply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       return;
     }
 
-    if (!client.riffy.nodes || client.riffy.nodes.size === 0) {
+    if (!client.manager.nodes?.hasOnlineNodes) {
       const embed = new EmbedBuilder()
         .setColor("#ff0000")
         .setAuthor({
@@ -67,52 +65,54 @@ module.exports = {
           text: "Enjoy your music",
           iconURL: icons.footerIcon,
         })
-        .setDescription("No Lavalink nodes are available.");
+        .setDescription("No audio nodes (NodeLink/Lavalink) are available.");
 
-      await interaction.reply({
-        embeds: [embed],
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.editReply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       return;
     }
 
-    let player = client.riffy.players.get(interaction.guildId);
+    let player = client.manager.players.get(interaction.guildId);
 
     if (!player) {
-      player = client.riffy.createConnection({
-        defaultVolume: 50,
+      player = client.manager.players.create({
         guildId: interaction.guildId,
-        voiceChannel: config.channelId,
-        textChannel: config.channelId,
-        deaf: true,
+        voiceChannelId: config.channelId,
+        textChannelId: config.channelId,
+        volume: 50,
+        selfDeaf: true,
       });
     }
 
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    if (!player.connected) {
+      // Voice connects in the background — don't block the command on the handshake
+      player.connect({ selfDeaf: true }).catch((err) => {
+        log("ERROR", `Voice connection failed: ${err.message}`);
+      });
+    }
 
-    const resolve = await client.riffy.resolve({
+    const result = await client.manager.search({
       query,
       requester: interaction.user.username,
     });
 
-    if (!resolve || typeof resolve !== "object" || !Array.isArray(resolve.tracks)) {
-      throw new TypeError("Invalid response from Riffy API.");
+    if (!result || typeof result !== "object" || !Array.isArray(result.tracks)) {
+      throw new TypeError("Invalid response from Moonlink search.");
     }
 
     let addedTracks = 0;
     let isPlaylist = false;
 
-    if (resolve.loadType === "playlist") {
+    if (result.loadType === "playlist") {
       isPlaylist = true;
-      for (const track of resolve.tracks) {
-        track.info.requester = interaction.user.username;
+      for (const track of result.tracks) {
+        track.requester = interaction.user.username;
         player.queue.add(track);
         addedTracks++;
       }
-    } else if (resolve.loadType === "search" || resolve.loadType === "track") {
-      const track = resolve.tracks[0];
+    } else if (result.loadType === "search" || result.loadType === "track") {
+      const track = result.tracks[0];
       if (track) {
-        track.info.requester = interaction.user.username;
+        track.requester = interaction.user.username;
         player.queue.add(track);
         addedTracks = 1;
       }
@@ -134,7 +134,7 @@ module.exports = {
     }
 
     if (!player.playing && !player.paused) {
-      player.play();
+      await player.play();
     }
 
     const successEmbed = new EmbedBuilder()

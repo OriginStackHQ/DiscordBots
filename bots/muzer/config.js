@@ -8,16 +8,10 @@ module.exports = {
   mongodbUri: process.env.MONGODB_URI,
   nodes: [
     {
-      host: "lavalink.serenetia.com",
-      password: "https://dsc.gg/ajidevserver",
-      port: 443,
-      secure: true,
-    },
-    {
-      host: "lavalinkv4.serenetia.com",
-      port: 443,
-      password: "https://seretia.link/discord",
-      secure: true,
+      host: "127.0.0.1",
+      port: 3000,
+      password: "youshallnotpass",
+      secure: false,
     },
   ],
 };

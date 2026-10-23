@@ -59,34 +59,6 @@ const scrapeWallpaper = async (url) => {
   }
 };
 
-const getImdbData = async (imdbID) => {
-  const apiKey = config.omdbApiKey;
-  const url = `https://www.omdbapi.com/?i=${imdbID}&apiKey=${apiKey}`;
-
-  try {
-    const response = await axios.get(url);
-    const data = response.data;
-
-    if (data.Response === "False") throw new Error("Media not found");
-
-    return {
-      title: data.Title,
-      year: data.Year,
-      released: data.Released,
-      genre: data.Genre,
-      poster: data.Poster,
-      imdbRating: data.imdbRating,
-      imdbVotes: data.imdbVotes,
-      type: data.Type.split(" ")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" "),
-    };
-  } catch (error) {
-    console.error("Error fetching media data:", error.message);
-    throw new Error("Failed to fetch IMDB data. Please try again.");
-  }
-};
-
 const scrapeTemplate = async (url) => {
   try {
     const parsedUrl = new URL(url);
@@ -150,4 +122,4 @@ const websiteInfo = async (url) => {
   }
 };
 
-module.exports = { scrapeWallpaper, getImdbData, scrapeTemplate, websiteInfo };
+module.exports = { scrapeWallpaper, scrapeTemplate, websiteInfo };

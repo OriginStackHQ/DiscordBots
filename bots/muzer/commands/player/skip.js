@@ -7,7 +7,7 @@ module.exports = {
   async execute(interaction) {
     const client = interaction.client;
 
-    const player = client.riffy.players.get(interaction.guildId);
+    const player = client.manager.players.get(interaction.guildId);
 
     if (!player) {
       const embed = new EmbedBuilder()
@@ -19,7 +19,15 @@ module.exports = {
       return await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 
-    player.stop();
+    // Moonlink: `skip()` plays the next queued track, while `stop()` just
+    // halts playback. When nothing is left in the queue the player is
+    // stopped and destroyed to keep the old session behavior.
+    const hadQueuedTracks = player.queue.size > 0;
+    await player.skip();
+
+    if (!hadQueuedTracks) {
+      await player.destroy("Skip with empty queue");
+    }
 
     const embed = new EmbedBuilder()
       .setColor("#00ff00")

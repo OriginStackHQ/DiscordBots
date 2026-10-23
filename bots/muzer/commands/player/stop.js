@@ -7,7 +7,7 @@ module.exports = {
   async execute(interaction) {
     const client = interaction.client;
 
-    const player = client.riffy.players.get(interaction.guildId);
+    const player = client.manager.players.get(interaction.guildId);
 
     if (!player) {
       const embed = new EmbedBuilder()
@@ -19,8 +19,7 @@ module.exports = {
       return await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 
-    player.stop();
-    player.destroy();
+    await player.destroy("Stop command");
 
     const embed = new EmbedBuilder()
       .setColor("#00ff00")

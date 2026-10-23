@@ -1,4 +1,4 @@
-const { Riffy } = require("riffy");
+const { Manager } = require("moonlink.js");
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionsBitField } = require("discord.js");
 const config = require("./config.js");
 const icons = require("./icons");
@@ -106,7 +106,7 @@ const embedCreator = {
         },
         {
           name: "Duration",
-          value: timeFormatter.msToReadable(trackInfo.length),
+          value: timeFormatter.msToReadable(trackInfo.duration),
           inline: true,
         },
         {
@@ -229,8 +229,13 @@ const databaseManager = {
 };
 
 const messageCleanup = {
-  removePreviousMessages: async (client, guildId) => {
+  removePreviousMessages: async (client, guildId, reason = "unspecified") => {
     const messagesToDelete = await databaseManager.cleanupGuildMessages(guildId);
+
+    if (!messagesToDelete.length) return;
+
+    const ids = messagesToDelete.map((m) => m.messageId).join(", ");
+    log("DEBUG", `Deleting ${messagesToDelete.length} tracked message(s) for guild ${guildId} (reason: ${reason}) [${ids}]`);
 
     for (const msgInfo of messagesToDelete) {
       try {
@@ -275,7 +280,7 @@ const loopManager = {
   },
 
   disableLoop: (player, channel) => {
-    player.setLoop("none");
+    player.setLoop("off");
     messageManager.sendNotification(channel, "❌ **Loop mode disabled!**");
   },
 };
@@ -333,16 +338,17 @@ const lyricsService = {
   },
 
   displayLyrics: async (channel, player) => {
-    if (!player?.current?.info) {
+    const currentTrack = player?.current;
+
+    if (!currentTrack) {
       messageManager.sendNotification(channel, "🚫 **No active track found.**");
       return;
     }
 
-    const trackData = player.current.info;
     const lyricsContent = await lyricsService.fetchLyrics(
-      trackData.title,
-      trackData.author,
-      Math.floor(trackData.length / 1000),
+      currentTrack.title,
+      currentTrack.author,
+      Math.floor(currentTrack.duration / 1000),
     );
 
     if (!lyricsContent) {
@@ -355,12 +361,12 @@ const lyricsService = {
       .map((line) => line.trim())
       .filter(Boolean);
 
-    const trackDurationSeconds = Math.floor(trackData.length / 1000);
+    const trackDurationSeconds = Math.floor(currentTrack.duration / 1000);
 
     const lyricsEmbed = new EmbedBuilder()
       .setColor("#fe8a7a")
       .setAuthor({ name: "Lyrics", iconURL: icons.headerIcon })
-      .setTitle(`🎵 Live Lyrics: ${trackData.title}`)
+      .setTitle(`🎵 Live Lyrics: ${currentTrack.title}`)
       .setDescription("🔄 Synchronizing lyrics...")
       .setFooter({ text: "Enjoy your music", iconURL: icons.footerIcon });
 
@@ -377,7 +383,9 @@ const lyricsService = {
     await databaseManager.storeTrackMessage(player.guildId, lyricsMessage.id, channel.id, "lyrics");
 
     const updateLyricsDisplay = async () => {
-      const currentPosition = Math.floor(player.position / 1000);
+      if (!player.current) return;
+
+      const currentPosition = Math.floor((player.current.position ?? 0) / 1000);
       const linesPerSecond = lyricsLines.length / trackDurationSeconds;
       const currentLineIndex = Math.floor(currentPosition * linesPerSecond);
 
@@ -385,8 +393,13 @@ const lyricsService = {
       const endIndex = Math.min(lyricsLines.length, currentLineIndex + 3);
       const visibleLyrics = lyricsLines.slice(startIndex, endIndex).join("\n");
 
-      lyricsEmbed.setDescription(visibleLyrics);
-      await lyricsMessage.edit({ embeds: [lyricsEmbed] });
+      try {
+        lyricsEmbed.setDescription(visibleLyrics);
+        await lyricsMessage.edit({ embeds: [lyricsEmbed] });
+      } catch (error) {
+        // Message deleted (track change / cleanup) — stop updating
+        clearInterval(lyricsUpdateInterval);
+      }
     };
 
     const lyricsUpdateInterval = setInterval(updateLyricsDisplay, 3000);
@@ -435,7 +448,7 @@ const playerControls = {
     const controlActions = {
       loopToggle: () => loopManager.toggleLoopMode(player, channel),
       skipTrack: async () => {
-        player.stop();
+        await player.skip();
         await messageManager.sendNotification(channel, "⏭️ **Skipping to next track!**");
       },
       disableLoop: () => loopManager.disableLoop(player, channel),
@@ -445,15 +458,14 @@ const playerControls = {
         await messageManager.sendNotification(channel, "🗑️ **Queue cleared successfully!**");
       },
       stopTrack: async () => {
-        player.stop();
-        player.destroy();
+        await player.destroy("Player controls: Stop");
         await messageManager.sendNotification(channel, "⏹️ **Playback stopped and player destroyed!**");
       },
       pauseTrack: async () => {
         if (player.paused) {
           await messageManager.sendNotification(channel, "⏸️ **Already paused!**");
         } else {
-          player.pause(true);
+          await player.pause();
           await messageManager.sendNotification(channel, "⏸️ **Playback paused!**");
         }
       },
@@ -461,7 +473,7 @@ const playerControls = {
         if (!player.paused) {
           await messageManager.sendNotification(channel, "▶️ **Already playing!**");
         } else {
-          player.pause(false);
+          await player.resume();
           await messageManager.sendNotification(channel, "▶️ **Playback resumed!**");
         }
       },
@@ -477,59 +489,70 @@ const playerControls = {
     const interactionFilter = (interaction) =>
       [...CONTROL_BUTTONS.ROW_ONE, ...CONTROL_BUTTONS.ROW_TWO].includes(interaction.customId);
 
-    const collector = message.createMessageComponentCollector({
-      filter: interactionFilter,
-      time: COLLECTOR_TIMEOUT,
-    });
+    const armCollector = () => {
+      const collector = message.createMessageComponentCollector({
+        filter: interactionFilter,
+        time: COLLECTOR_TIMEOUT,
+      });
 
-    collector.on("collect", async (interaction) => {
-      await interaction.deferUpdate();
+      collector.on("collect", async (interaction) => {
+        await interaction.deferUpdate();
 
-      const userVoiceChannel = interaction.member.voice.channel;
-      const playerVoiceChannel = player.voiceChannel;
+        const userVoiceChannel = interaction.member.voice.channel;
+        const playerVoiceChannel = player.voiceChannelId;
 
-      if (!userVoiceChannel || userVoiceChannel.id !== playerVoiceChannel) {
-        messageManager.sendNotification(channel, "**Join the same voice channel to use controls!**");
-        return;
-      }
+        if (!userVoiceChannel || userVoiceChannel.id !== playerVoiceChannel) {
+          messageManager.sendNotification(channel, "**Join the same voice channel to use controls!**");
+          return;
+        }
 
-      playerControls.handleUserInteraction(interaction, player, channel);
-    });
+        playerControls.handleUserInteraction(interaction, player, channel);
+      });
 
-    collector.on("end", () => {
-      log("INFO", "Message collector ended.");
-    });
+      collector.on("end", () => {
+        log("INFO", "Message collector ended.");
+        // Keep controls alive for long tracks — re-arm until the player is gone
+        if (!player.destroyed) armCollector();
+      });
+    };
 
-    return collector;
+    armCollector();
   },
 };
 
 const autoplayHandler = {
-  handleQueueEnd: async (client, player) => {
-    const channel = client.channels.cache.get(player.textChannel);
+  handleQueueEnd: async (client, player, lastTrack) => {
+    const channel = client.channels.cache.get(player.textChannelId);
     const guildId = player.guildId;
 
     try {
       const autoplayConfig = await getCollection("guildConfigs").findOne({ guildId });
 
       if (autoplayConfig?.autoplay) {
-        const nextTrack = await player.autoplay(player);
+        let autoplayed = false;
 
-        if (!nextTrack) {
-          await messageCleanup.removePreviousMessages(client, guildId);
-          player.destroy();
+        try {
+          // Moonlink autoplay resolves against the finished track directly
+          autoplayed = lastTrack ? await player.node.handleAutoPlay(player, lastTrack) : false;
+        } catch (error) {
+          log("ERROR", `Autoplay error: ${error.message}`);
+        }
+
+        if (!autoplayed) {
+          await messageCleanup.removePreviousMessages(client, guildId, "queueEnd");
+          await player.destroy("Autoplay unavailable");
           messageManager.sendNotification(channel, "**No more autoplay tracks available.**");
         }
       } else {
-        await messageCleanup.removePreviousMessages(client, guildId);
+        await messageCleanup.removePreviousMessages(client, guildId, "queueEnd");
         log("INFO", `Autoplay disabled for guild: ${guildId}`);
-        player.destroy();
+        await player.destroy("Queue ended");
         messageManager.sendNotification(channel, "**Queue ended. Autoplay is disabled.**");
       }
     } catch (error) {
       log("ERROR", `Autoplay error: ${error.message}`);
-      await messageCleanup.removePreviousMessages(client, guildId);
-      player.destroy();
+      await messageCleanup.removePreviousMessages(client, guildId, "queueEnd");
+      await player.destroy("Queue end error").catch(() => {});
       messageManager.sendNotification(channel, "**Queue empty! Disconnecting...**");
     }
   },
@@ -538,61 +561,81 @@ const autoplayHandler = {
 const nodeManager = {
   configureNodes: (config) => {
     return config.nodes.map((nodeConfig) => ({
+      identifier: `${nodeConfig.host}:${nodeConfig.port}`,
       host: nodeConfig.host,
       port: nodeConfig.port,
       password: nodeConfig.password,
       secure: nodeConfig.secure,
-      reconnectTimeout: 5000,
-      reconnectTries: 10,
+      retryDelay: 5000,
+      retryAmount: 10,
     }));
   },
 };
 
 function initializePlayer(client) {
-  log("INFO", "Setting up Riffy music system...");
+  log("INFO", "Setting up Moonlink music system...");
 
   const nodeConfiguration = nodeManager.configureNodes(config);
 
-  client.riffy = new Riffy(client, nodeConfiguration, {
-    send: (payload) => {
-      const guildId = payload.d.guild_id;
-      if (!guildId) return;
-
+  client.manager = new Manager({
+    nodes: nodeConfiguration,
+    options: {
+      clientName: "muzer/1.0.0",
+      // Same as Riffy's ytmsearch default
+      search: { defaultPlatform: "youtubemusic" },
+      voiceConnection: {
+        timeout: 30000,
+        autoReconnect: true,
+      },
+    },
+    // Moonlink hands us the guildId + the voice payload directly
+    send: (guildId, payload) => {
       const targetGuild = client.guilds.cache.get(guildId);
       if (targetGuild) targetGuild.shard.send(payload);
     },
-    defaultSearchPlatform: "ytmsearch",
-    restVersion: "v4",
   });
 
   const vcStatus = new VibeSync(client);
 
+  // Deferred disconnect cleanups — NodeLink's ConnectionStatusEvent carries
+  // network quality ("good"/"bad"), which Moonlink misreads as a voice disconnect
+  const pendingDisconnects = new Map(); // guildId → grace timer
+  const cancelPendingDisconnect = (guildId) => {
+    const timer = pendingDisconnects.get(guildId);
+    if (timer) {
+      clearTimeout(timer);
+      pendingDisconnects.delete(guildId);
+    }
+  };
+
   // Node connection events
-  client.riffy.on("nodeConnect", (node) => {
+  client.manager.on("nodeConnect", (node) => {
     log("SUCCESS", `Music node connected ✅ | ${node.host}:${node.port}`);
   });
 
-  client.riffy.on("nodeDisconnect", (node) => {
-    log("WARN", `Music node disconnected ⚠️ | ${node.host}:${node.port}`);
+  client.manager.on("nodeDisconnect", (node, code, reason) => {
+    log("WARN", `Music node disconnected ⚠️ | ${node.host}:${node.port} | code: ${code} ${reason || ""}`);
   });
 
-  client.riffy.on("nodeError", (node, error) => {
+  client.manager.on("nodeError", (node, error) => {
     log("ERROR", `Music node error ❌ | ${error.message}`);
   });
 
   // Track playback events
-  client.riffy.on("trackStart", async (player, track) => {
-    const channel = client.channels.cache.get(player.textChannel);
-    const voice = client.channels.cache.get(player.voiceChannel);
+  client.manager.on("trackStart", async (player, track) => {
+    cancelPendingDisconnect(player.guildId);
+
+    const channel = client.channels.cache.get(player.textChannelId);
+    const voice = client.channels.cache.get(player.voiceChannelId);
     const guildId = player.guildId;
-    const requesterInfo = track.info.requester || "Autoplay";
-    const status = `${track.info.title} - ${track.info.author}`;
+    const requesterInfo = track.requester || track.userData?.requester || "Autoplay";
+    const status = `${track.title} - ${track.author}`;
 
-    await messageCleanup.removePreviousMessages(client, guildId);
+    await messageCleanup.removePreviousMessages(client, guildId, "trackStart");
 
-    const thumbnail = track.info.thumbnail || client.user.displayAvatarURL({ dynamic: true });
+    const thumbnail = track.thumbnail || client.user.displayAvatarURL({ dynamic: true });
 
-    const trackEmbed = embedCreator.buildTrackEmbed(track.info, requesterInfo, thumbnail);
+    const trackEmbed = embedCreator.buildTrackEmbed(track, requesterInfo, thumbnail);
     const [firstRow, secondRow, thirdRow, fourthRow] = controlsBuilder.createButtonRows(false);
 
     const playerMessage = await messageManager.sendPlayerMessage(channel, trackEmbed, [
@@ -613,24 +656,106 @@ function initializePlayer(client) {
     }
   });
 
-  client.riffy.on("trackEnd", async (player) => {
-    await messageCleanup.removePreviousMessages(client, player.guildId);
+  client.manager.on("trackEnd", async (player) => {
+    await messageCleanup.removePreviousMessages(client, player.guildId, "trackEnd");
   });
 
-  client.riffy.on("playerDisconnect", async (player) => {
-    await messageCleanup.removePreviousMessages(client, player.guildId);
+  client.manager.on("playerDisconnected", (player) => {
+    // Don't tear down immediately — wait and verify the node still has us playing
+    if (pendingDisconnects.has(player.guildId)) return;
+    pendingDisconnects.set(
+      player.guildId,
+      setTimeout(async () => {
+        pendingDisconnects.delete(player.guildId);
+        try {
+          if (player.destroyed) return; // playerDestroy cleanup already ran
+          if (player.current && player.playing) {
+            log("DEBUG", `Ignoring spurious playerDisconnected for guild ${player.guildId} — track still active.`);
+            return;
+          }
+          await messageCleanup.removePreviousMessages(client, player.guildId, "playerDisconnected");
+          const voice = client.channels.cache.get(player.voiceChannelId);
+          if (voice) {
+            await vcStatus
+              .setVoiceStatus(voice.id, "Enjoy your music!")
+              .catch((err) => log("ERROR", `Failed to update voice status: ${err.message}`));
+          }
+        } catch (error) {
+          log("ERROR", `playerDisconnected cleanup error: ${error.message}`);
+        }
+      }, 10000)
+    );
   });
 
-  client.riffy.on("queueEnd", async (player) => {
-    const voice = client.channels.cache.get(player.voiceChannel);
+  client.manager.on("playerConnected", (player) => {
+    cancelPendingDisconnect(player.guildId);
+  });
+
+  // Cleanup pinned messages + voice status after destroy (/stop, queue end)
+  client.manager.on("playerDestroy", async (player) => {
+    if (player?.guildId) {
+      cancelPendingDisconnect(player.guildId);
+      await messageCleanup.removePreviousMessages(client, player.guildId, "playerDestroy");
+    }
+
+    const voice = client.channels.cache.get(player?.voiceChannelId);
+    if (voice) {
+      await vcStatus
+        .setVoiceStatus(voice.id, "Enjoy your music!")
+        .catch((err) => log("ERROR", `Failed to update voice status: ${err.message}`));
+    }
+  });
+
+  client.manager.on("queueEnd", async (player, lastTrack) => {
+    const voice = client.channels.cache.get(player.voiceChannelId);
     const status = "Enjoy your music!";
 
-    await vcStatus
-      .setVoiceStatus(voice.id, status)
-      .then(() => log("SUCCESS", `Voice channel status updated: ${status}`))
-      .catch((err) => log("ERROR", `Failed to update voice status: ${err.message}`));
-    await autoplayHandler.handleQueueEnd(client, player);
+    if (voice) {
+      await vcStatus
+        .setVoiceStatus(voice.id, status)
+        .then(() => log("SUCCESS", `Voice channel status updated: ${status}`))
+        .catch((err) => log("ERROR", `Failed to update voice status: ${err.message}`));
+    }
+    await autoplayHandler.handleQueueEnd(client, player, lastTrack);
   });
+
+  // Rebuild the interactive player UI after restarts or node failures
+  // (Moonlink emits playerResumed on bot restart, playerRecoverySuccess on node recovery)
+  const restorePlayerUI = async (player) => {
+    try {
+      cancelPendingDisconnect(player?.guildId);
+      const track = player.current;
+      if (!track || player.destroyed) return;
+
+      const channel = client.channels.cache.get(player.textChannelId);
+      if (!channel) return;
+
+      await messageCleanup.removePreviousMessages(client, player.guildId, "playerRecovery");
+
+      const requesterInfo = track.requester || track.userData?.requester || "Autoplay";
+      const thumbnail = track.thumbnail || client.user.displayAvatarURL({ dynamic: true });
+
+      const trackEmbed = embedCreator.buildTrackEmbed(track, requesterInfo, thumbnail);
+      const [firstRow, secondRow, thirdRow, fourthRow] = controlsBuilder.createButtonRows(false);
+
+      const playerMessage = await messageManager.sendPlayerMessage(channel, trackEmbed, [
+        firstRow,
+        secondRow,
+        thirdRow,
+        fourthRow,
+      ]);
+
+      if (playerMessage) {
+        await databaseManager.storeTrackMessage(player.guildId, playerMessage.id, channel.id);
+        playerControls.setupMessageCollector(client, player, channel, playerMessage);
+      }
+    } catch (error) {
+      log("ERROR", `Failed to restore player UI: ${error.message}`);
+    }
+  };
+
+  client.manager.on("playerResumed", restorePlayerUI);
+  client.manager.on("playerRecoverySuccess", restorePlayerUI);
 }
 
 module.exports = { initializePlayer };

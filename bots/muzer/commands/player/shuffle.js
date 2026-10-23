@@ -7,9 +7,9 @@ module.exports = {
   async execute(interaction) {
     const client = interaction.client;
 
-    const player = client.riffy.players.get(interaction.guildId);
+    const player = client.manager.players.get(interaction.guildId);
 
-    if (!player || !player.queue || player.queue.length === 0) {
+    if (!player || !player.queue || player.queue.size === 0) {
       const embed = new EmbedBuilder()
         .setColor("#ff0000")
         .setAuthor({ name: "Queue is empty", iconURL: icons.headerIcon })
@@ -19,10 +19,7 @@ module.exports = {
       return await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 
-    for (let i = player.queue.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [player.queue[i], player.queue[j]] = [player.queue[j], player.queue[i]];
-    }
+    player.queue.shuffle();
 
     const embed = new EmbedBuilder()
       .setColor("#00ff00")

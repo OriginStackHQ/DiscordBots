@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 const { getCollection } = require("../../mongodb");
 const icons = require("../../icons");
+const { log } = require("../../utils/common");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -12,6 +13,9 @@ module.exports = {
     const client = interaction.client;
     const playlistName = interaction.options.getString("name");
     const userId = interaction.user.id;
+
+    // Acknowledge instantly — voice joins and many song searches take > 3s
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const config = await getCollection("guildConfigs").findOne({ guildId: interaction.guild.id });
 
@@ -28,10 +32,7 @@ module.exports = {
         })
         .setDescription("Music channel is not set. Please contact moderator.");
 
-      await interaction.reply({
-        embeds: [embed],
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.editReply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -48,14 +49,11 @@ module.exports = {
         })
         .setDescription(`You must be in <#${config.channelId}> voice channel to use this command.`);
 
-      await interaction.reply({
-        embeds: [embed],
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.editReply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       return;
     }
 
-    if (!client.riffy.nodes || client.riffy.nodes.size === 0) {
+    if (!client.manager.nodes?.hasOnlineNodes) {
       const embed = new EmbedBuilder()
         .setColor("#ff0000")
         .setAuthor({
@@ -66,12 +64,9 @@ module.exports = {
           text: "Enjoy your music",
           iconURL: icons.footerIcon,
         })
-        .setDescription("No Lavalink nodes are available.");
+        .setDescription("No audio nodes (NodeLink/Lavalink) are available.");
 
-      await interaction.reply({
-        embeds: [embed],
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.editReply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -87,10 +82,7 @@ module.exports = {
         .setFooter({ text: "Enjoy your music", iconURL: icons.footerIcon })
         .setDescription("Playlist not found.");
 
-      await interaction.reply({
-        embeds: [embed],
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.editReply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -104,10 +96,7 @@ module.exports = {
         .setFooter({ text: "Enjoy your music", iconURL: icons.footerIcon })
         .setDescription("You do not have permission to play this private playlist.");
 
-      await interaction.reply({
-        embeds: [embed],
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.editReply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -121,39 +110,45 @@ module.exports = {
         .setFooter({ text: "Enjoy your music", iconURL: icons.footerIcon })
         .setDescription("The playlist is empty.");
 
-      await interaction.reply({
-        embeds: [embed],
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.editReply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       return;
     }
 
-    const player = client.riffy.createConnection({
-      defaultVolume: 50,
-      guildId: interaction.guildId,
-      voiceChannel: config.channelId,
-      textChannel: config.channelId,
-      deaf: true,
-    });
+    let player = client.manager.players.get(interaction.guildId);
 
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    if (!player) {
+      player = client.manager.players.create({
+        guildId: interaction.guildId,
+        voiceChannelId: config.channelId,
+        textChannelId: config.channelId,
+        volume: 50,
+        selfDeaf: true,
+      });
+    }
+
+    if (!player.connected) {
+      // Voice joins in the background, keep the command fast
+      player.connect({ selfDeaf: true }).catch((err) => {
+        log("ERROR", `Voice connection failed: ${err.message}`);
+      });
+    }
 
     for (const song of playlist.songs) {
       const query = song.url || song.name;
-      const resolve = await client.riffy.resolve({
+      const result = await client.manager.search({
         query,
         requester: interaction.user.username,
       });
 
-      if (!resolve || typeof resolve !== "object") {
-        throw new TypeError("Resolve response is not an object");
+      if (!result || typeof result !== "object") {
+        throw new TypeError("Search response is not an object");
       }
 
-      const { loadType, tracks } = resolve;
+      const { loadType, tracks } = result;
       if (loadType === "track" || loadType === "search") {
-        const track = resolve.tracks[0];
+        const track = result.tracks[0];
         if (track) {
-          track.info.requester = interaction.user.username;
+          track.requester = interaction.user.username;
           player.queue.add(track);
         }
       } else {
@@ -171,7 +166,7 @@ module.exports = {
       }
     }
 
-    if (!player.playing && !player.paused) player.play();
+    if (!player.playing && !player.paused) await player.play();
 
     const embed = new EmbedBuilder()
       .setColor("#fe8a7a")

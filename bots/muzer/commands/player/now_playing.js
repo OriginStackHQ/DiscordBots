@@ -32,7 +32,7 @@ module.exports = {
   async execute(interaction) {
     const { client, guildId } = interaction;
 
-    const player = client.riffy.players.get(guildId);
+    const player = client.manager.players.get(guildId);
 
     if (!player || !player.current) {
       const noSongEmbed = new EmbedBuilder()
@@ -50,8 +50,8 @@ module.exports = {
       });
     }
 
-    const currentSeconds = player.position / 1000;
-    const totalSeconds = player.current.info.length / 1000;
+    const currentSeconds = (player.current.position ?? 0) / 1000;
+    const totalSeconds = player.current.duration / 1000;
     const progressBar = createProgressBar(currentSeconds, totalSeconds);
 
     const nowPlayingEmbed = new EmbedBuilder()
@@ -61,13 +61,13 @@ module.exports = {
         iconURL: icons.headerIcon,
       })
       .setDescription(
-        `**[${player.current.info.title}](${player.current.info.uri})**\n` +
-          `*by ${player.current.info.author}*\n\n` +
+        `**[${player.current.title}](${player.current.uri})**\n` +
+          `*by ${player.current.author}*\n\n` +
           `${progressBar}` +
-          `\n\nRequested by: ${player.current.info.requester || "Autoplay"}` +
+          `\n\nRequested by: ${player.current.requester || player.current.userData?.requester || "Autoplay"}` +
           `\nVolume: ${player.volume}%`,
       )
-      .setThumbnail(player.current.info.thumbnail)
+      .setThumbnail(player.current.thumbnail)
       .setFooter({ text: "Enjoy your music!", iconURL: icons.footerIcon });
 
     await interaction.reply({ embeds: [nowPlayingEmbed], flags: MessageFlags.Ephemeral });

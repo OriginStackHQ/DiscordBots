@@ -13,7 +13,7 @@ module.exports = {
     const client = interaction.client;
     const volume = interaction.options.getInteger("level");
 
-    const player = client.riffy.players.get(interaction.guildId);
+    const player = client.manager.players.get(interaction.guildId);
 
     if (!player) {
       const embed = new EmbedBuilder()

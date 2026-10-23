@@ -10,16 +10,22 @@ module.exports = {
 
   async execute(interaction) {
     const nodes = config.nodes.map((nodeConfig) => ({
+      identifier: `${nodeConfig.host}:${nodeConfig.port}`,
       host: nodeConfig.host,
       port: nodeConfig.port,
       password: nodeConfig.password,
       secure: nodeConfig.secure,
-      reconnectTimeout: 5000,
-      reconnectTries: 10,
+      retryDelay: 5000,
+      retryAmount: 10,
     }));
 
+    const nodeInstances = interaction.client.manager.nodes;
+
     for (const node of nodes) {
-      await interaction.client.riffy.createNode(node);
+      // Moonlink throws when adding a duplicate identifier — remove the
+      // existing connection first so each configured node is re-added fresh.
+      nodeInstances.remove(node.identifier);
+      nodeInstances.add(node);
     }
 
     const embed = new EmbedBuilder()
