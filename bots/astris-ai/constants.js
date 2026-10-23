@@ -9,20 +9,6 @@ const CHANNELS = {
   },
 };
 
-const DATA = {
-  image_fx_cookie: {
-    option: "cookie",
-    dbField: "imageFxCookie",
-    displayName: "Image Fx Cookie",
-  },
-  image_fx_key: {
-    dbFieldKey: "imageFxKey",
-    dbFieldExpiry: "imageFxKeyExpiry",
-    displayName: "Image Fx Key",
-  },
-};
-
 module.exports = {
   CHANNELS,
-  DATA,
 };
